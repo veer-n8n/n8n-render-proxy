@@ -2,11 +2,14 @@ import express from "express";
 import fetch from "node-fetch";
 
 const app = express();
-app.use(express.json({ limit: "10mb" }));
 
-app.post("/proxy", async (req, res) => {
+// allow large payloads (image/audio/video/base64)
+app.use(express.json({ limit: "100mb" }));
+
+// universal proxy (POST / GET)
+app.all("/proxy", async (req, res) => {
   try {
-    const { url, method = "POST", headers = {}, body } = req.body;
+    const { url, method = "POST", headers = {}, body } = req.body || {};
 
     if (!url) {
       return res.status(400).json({ error: "Missing target URL" });
@@ -18,23 +21,31 @@ app.post("/proxy", async (req, res) => {
       body: body ? JSON.stringify(body) : undefined
     });
 
-    const contentType = response.headers.get("content-type");
+    const contentType = response.headers.get("content-type") || "";
 
-    if (contentType && contentType.includes("application/json")) {
-      const data = await response.json();
-      return res.json(data);
+    // JSON response
+    if (contentType.includes("application/json")) {
+      const json = await response.json();
+      return res.json(json);
     }
 
-    const text = await response.text();
-    res.send(text);
+    // Binary response (image / audio / video / file)
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Length", buffer.length);
+    res.send(buffer);
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: "Proxy error",
+      message: err.message
+    });
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("Proxy running");
+// health check
+app.get("/", (_, res) => {
+  res.send("n8n proxy running");
 });
 
 const PORT = process.env.PORT || 3000;
